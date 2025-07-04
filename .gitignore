@@ -1,0 +1,6 @@
+# Abaikan semua file dan folder
+*
+/Data
+
+!.gitignore
+!main.py
