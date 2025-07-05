@@ -14,6 +14,8 @@ import mediapipe as mp
 from collections import deque, Counter
 import argparse
 import json
+import pyttsx3  
+import threading  
 
 # Initialize MediaPipe
 mp_holistic = mp.solutions.holistic
@@ -24,13 +26,15 @@ mp_drawing_styles = mp.solutions.drawing_styles
 class Config:
     DATA_PATH = 'Data/'
     MODEL_PATH = 'best_model.pt'
-    ACTIONS = ['hello', 'see you later', 'i or me', 'yes','no','help','thank you','what?','repeat','more','fine','go to','learn','sign','finish','']  # Added 'none' class for no action
-    NO_SEQUENCES = 50
+    ACTIONS = ['hello', 'see you later', 'i or me', 'yes','no','help',
+               'thank you','what?','repeat','more','fine','go to',
+               'learn','sign','finish','none']  # Added 'none' class for no action
+    NO_SEQUENCES = 50  # Increased number of sequences
     SEQUENCE_LENGTH = 30
     INPUT_SIZE = 1662
     HIDDEN_SIZE = 512
     NUM_LAYERS = 3
-    EPOCHS = 100
+    EPOCHS = 150
     BATCH_SIZE = 64
     LEARNING_RATE = 0.0001
     DROPOUT = 0.4
@@ -40,6 +44,7 @@ class Config:
     SMOOTHING_WINDOW = 5  # For prediction smoothing
     MIN_GESTURE_DURATION = 0.5  # Minimum duration to register a gesture (seconds)
     COOLDOWN_PERIOD = 1.0  # Time between gesture registrations
+    TTS_ENABLED = True
     
 config = Config()
 
@@ -106,7 +111,7 @@ def draw_styled_landmarks(image, results):
             mp_drawing_styles.get_default_hand_connections_style()
         )
 
-# ===================== Data Collection with Camera Preview =====================
+# ===================== Data Collection with One-Button Start =====================
 def collect_data():
     # Create necessary folders
     for action in config.ACTIONS:
@@ -121,60 +126,11 @@ def collect_data():
         print("Error: Could not open webcam.")
         return
 
-    # Create preview window
-    cv2.namedWindow('Camera Preview', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('Camera Preview', 640, 480)
-
     with mp_holistic.Holistic(
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5,
-        model_complexity=1
+        model_complexity=1  # Reduced complexity for faster processing
     ) as holistic:
-        
-        # Preview phase - show camera without collecting data
-        preview_mode = True
-        while preview_mode:
-            ret, frame = cap.read()
-            if not ret:
-                continue
-            
-            frame = cv2.flip(frame, 1)
-            
-            # Draw preview instructions
-            cv2.putText(frame, 'Camera Preview - Check your position', (50, 50),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, 'Press SPACE to start collection', (50, 100),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, 'Press Q to quit', (50, 150),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2, cv2.LINE_AA)
-            
-            # Add mirror effect indicator
-            cv2.putText(frame, 'MIRROR VIEW', (500, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
-            
-            # Draw center alignment guides
-            height, width, _ = frame.shape
-            cv2.line(frame, (width//2, 0), (width//2, height), (0, 255, 0), 1)
-            cv2.line(frame, (0, height//2), (width, height//2), (0, 255, 0), 1)
-            cv2.circle(frame, (width//2, height//2), 10, (0, 255, 0), 2)
-            
-            # Draw face bounding box for positioning
-            cv2.rectangle(frame, (width//4, height//4), (3*width//4, 3*height//4), (0, 255, 0), 2)
-            
-            cv2.imshow('Camera Preview', frame)
-            
-            key = cv2.waitKey(1)
-            if key == 32:  # Space key
-                preview_mode = False
-            elif key == ord('q'):
-                cap.release()
-                cv2.destroyAllWindows()
-                return
-        
-        # Close preview window and open collection window
-        cv2.destroyWindow('Camera Preview')
-        cv2.namedWindow('Data Collection', cv2.WINDOW_NORMAL)
-        cv2.resizeWindow('Data Collection', 640, 480)
         
         for action_idx, action in enumerate(config.ACTIONS):
             if action == 'none': 
@@ -596,7 +552,50 @@ def evaluate_model(model, test_loader, actions):
     accuracy = np.mean(np.array(all_labels) == np.array(all_preds))
     print(f"Test Accuracy: {accuracy:.4f}")
 
-# ===================== Real-time Recognition with Transcription =====================
+
+# ===================== Text-to-Speech Function =====================
+class TTSManager:
+    def __init__(self):
+        self.engine = pyttsx3.init()
+        self.engine.setProperty('rate', 150)  # Kecepatan bicara
+        self.engine.setProperty('volume', 1.0)  # Volume (0.0 to 1.0)
+        self.thread = None
+        self.last_spoken = ""
+        self.last_time = 0
+        self.cooldown = 2.0  # Cooldown antara pengucapan
+        
+    def speak(self, text):
+        """Ucapkan teks jika tidak dalam cooldown"""
+        current_time = time.time()
+        if text != self.last_spoken or (current_time - self.last_time) > self.cooldown:
+            self.last_spoken = text
+            self.last_time = current_time
+            
+            # Hentikan thread sebelumnya jika masih berjalan
+            if self.thread and self.thread.is_alive():
+                self.engine.stop()
+                self.thread.join(timeout=0.1)
+            
+            # Mulai thread baru untuk pengucapan
+            self.thread = threading.Thread(target=self._speak_thread, args=(text,))
+            self.thread.daemon = True
+            self.thread.start()
+    
+    def _speak_thread(self, text):
+        """Thread untuk pengucapan teks"""
+        try:
+            self.engine.say(text)
+            self.engine.runAndWait()
+        except Exception as e:
+            print(f"TTS error: {str(e)}")
+    
+    def stop(self):
+        """Hentikan pengucapan"""
+        if self.thread and self.thread.is_alive():
+            self.engine.stop()
+            self.thread.join(timeout=0.1)
+
+# ===================== Real-time Recognition with Transcription and TTS =====================
 def load_trained_model():
     if not os.path.exists(config.MODEL_PATH):
         raise FileNotFoundError(f"Model file not found: {config.MODEL_PATH}")
@@ -633,7 +632,7 @@ class GestureTranscriber:
         self.previous_gesture = "none"
         self.gesture_start_time = 0
         self.last_add_time = 0
-        self.gesture_history = deque(maxlen=5)  # Keep last 5 gestures
+        self.gesture_history = deque(maxlen=5)
         
     def update(self, gesture, confidence):
         current_time = time.time()
@@ -664,6 +663,8 @@ class GestureTranscriber:
             self.transcript.append(gesture)
             self.gesture_history.append(gesture)
             self.last_add_time = current_time
+            return True
+        return False
     
     def get_transcript(self):
         return " ".join(self.transcript)
@@ -679,13 +680,14 @@ class GestureTranscriber:
 def realtime_recognition():
     model = load_trained_model()
     transcriber = GestureTranscriber()
+    tts_manager = TTSManager() if config.TTS_ENABLED else None
     
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Error: Could not open webcam.")
         return
     
-    # Try to set to 30fps. If the camera doesn't support, it will use the default.
+    # Try to set to 30fps
     cap.set(cv2.CAP_PROP_FPS, 30)
     
     sequence = deque(maxlen=config.SEQUENCE_LENGTH)
@@ -697,7 +699,7 @@ def realtime_recognition():
     with mp_holistic.Holistic(
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5,
-        model_complexity=0  # Fastest model for real-time
+        model_complexity=0
     ) as holistic:
         
         while cap.isOpened():
@@ -738,10 +740,10 @@ def realtime_recognition():
             transcriber.update(current_gesture, confidence)
             
             # Reset to "none" if no recent prediction
-            if time.time() - last_prediction_time > 2.0:  # 2 seconds timeout
+            if time.time() - last_prediction_time > 2.0:
                 current_gesture = "none"
             
-            # Draw landmarks (optional - can be disabled for performance)
+            # Draw landmarks
             draw_styled_landmarks(image, results)
             
             # Display prediction
@@ -756,32 +758,50 @@ def realtime_recognition():
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
             
             # Display transcript
-            cv2.rectangle(image, (0, 140), (640, 240), (0, 0, 0), -1)  # Background for text
+            cv2.rectangle(image, (0, 410), (640, 480), (0, 0, 0), -1)
             
             # Show recent gestures
-            cv2.putText(image, 'Recent:', (20, 170),
+            cv2.putText(image, 'Recent:', (20, 470),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
-            cv2.putText(image, transcriber.get_recent_gestures(), (100, 170),
+            cv2.putText(image, transcriber.get_recent_gestures(), (100, 470),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 1, cv2.LINE_AA)
             
-            # Show full transcript
-            cv2.putText(image, 'Transcript:', (20, 200),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
-            cv2.putText(image, transcriber.get_transcript(), (130, 200),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 1, cv2.LINE_AA)
+            # # Show full transcript
+            # cv2.putText(image, 'Transcript:', (20, 200),
+            #            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
+            # cv2.putText(image, transcriber.get_transcript(), (130, 200),
+            #            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 1, cv2.LINE_AA)
             
-            # Show reset instruction
-            cv2.putText(image, "Press 'r' to reset transcript", (20, 230),
+            # Show TTS status and instructions
+            tts_status = "ON" if config.TTS_ENABLED else "OFF"
+            cv2.putText(image, f"TTS: {tts_status} | Press 't' to toggle", (20, 430),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
+            cv2.putText(image, "Press 'r' to reset transcript | 'q' to quit", (20, 450),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
+            
+            # Trigger TTS for new gestures
+            if tts_manager and transcriber.gesture_history:
+                last_gesture = transcriber.gesture_history[-1]
+                if last_gesture != "none":
+                    tts_manager.speak(last_gesture)
             
             cv2.imshow('Gesture Recognition', image)
             
             # Handle key presses
             key = cv2.waitKey(10) & 0xFF
             if key == ord('q'):
+                if tts_manager:
+                    tts_manager.stop()
                 break
             elif key == ord('r'):
                 transcriber.reset_transcript()
+            elif key == ord('t'):
+                config.TTS_ENABLED = not config.TTS_ENABLED
+                if config.TTS_ENABLED and not tts_manager:
+                    tts_manager = TTSManager()
+                elif not config.TTS_ENABLED and tts_manager:
+                    tts_manager.stop()
+                    tts_manager = None
         
         cap.release()
         cv2.destroyAllWindows()

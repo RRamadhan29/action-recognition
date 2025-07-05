@@ -1,0 +1,11 @@
+numpy
+pandas
+matplotlib
+seaborn
+torch
+scikit-learn
+opencv-python
+mediapipe
+pyttsx3
+keyboard
+tqdm

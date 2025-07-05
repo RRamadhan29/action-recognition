@@ -4,3 +4,7 @@
 
 !.gitignore
 !main.py
+!training_history.png
+!confusion_matrix.png
+!README.MD
+!requirements.txt
