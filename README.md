@@ -90,7 +90,6 @@ pip install -r requirements.txt
 
 ## 🎬 How to Use
 A. **Collect Gesture Data**
-Run this command to start collecting landmark data:
 ```bash
 python main.py collect
 ```
