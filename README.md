@@ -18,7 +18,7 @@ Key features include:
 ---
 
 ## 🛠️ Technologies Used
-**Python** 3.10
+**Python** 
 
 **PyTorch** – Deep learning (LSTM + Attention)
 
