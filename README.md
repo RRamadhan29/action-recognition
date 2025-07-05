@@ -78,6 +78,7 @@ pip install -r requirements.txt
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
+   
 
 3. **Install required dependencies**:
    ```bash
@@ -93,6 +94,14 @@ A. **Collect Gesture Data**
 ```bash
 python main.py collect
 ```
+
+- Follow on-screen instructions.
+
+- press space to start every single "ACTIONS"
+
+- Press q to quit.
+
+- Landmarks will be saved under Data/.
 
 B. **Training Data Model**
 ```bash
@@ -110,6 +119,14 @@ C. **Running the Model**
 ```bash
 python main.py realtime
 ```
+- Follow on-screen instructions.
+
+- press t to activate/deactivate Text-to-Speech.
+
+- press r to reset transcript output.
+
+- Press q to quit.
+
 ---
 # **Contributing**
 
